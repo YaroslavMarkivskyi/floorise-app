@@ -10,4 +10,13 @@ declare module "next-auth" {
   }
 }
 
+// Dish recipe types — ingredients/steps are stored as Json (string[]) in Prisma
+export interface DishRecipe {
+  name: string
+  kcal: number
+  cookTime: number | null
+  ingredients: string[]
+  steps: string[]
+}
+
 export {}

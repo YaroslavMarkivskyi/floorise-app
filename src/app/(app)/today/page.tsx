@@ -54,6 +54,9 @@ export default async function TodayPage() {
         slotName: slot.name,
         dishName: activeDish?.name ?? "—",
         dishKcal: activeDish?.kcal ?? 0,
+        dishCookTime: activeDish?.cookTime ?? null,
+        dishIngredients: (activeDish?.ingredients as string[] | null) ?? [],
+        dishSteps: (activeDish?.steps as string[] | null) ?? [],
         initialDone: log.done,
       }
     }),
