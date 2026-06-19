@@ -7,6 +7,7 @@ import { redirect } from "next/navigation"
 import { db } from "@/lib/db"
 import { signIn, signOut } from "@/lib/auth"
 import { routes } from "@/lib/routes"
+import { seedUserDefaults } from "../../prisma/seed"
 
 export type AuthActionState = { error: string } | { success: true } | null
 
@@ -44,7 +45,7 @@ export async function registerUser(
 
   const passwordHash = await bcrypt.hash(password, 12)
 
-  await db.user.create({
+  const user = await db.user.create({
     data: {
       email,
       passwordHash,
@@ -57,6 +58,8 @@ export async function registerUser(
       },
     },
   })
+
+  await seedUserDefaults(user.id)
 
   redirect(`${routes.login}?registered=1`)
 }
