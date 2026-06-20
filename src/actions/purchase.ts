@@ -5,36 +5,9 @@ import { z } from "zod"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import type { ShoppingList, ShoppingItem } from "@/generated/prisma/client"
+import { STAPLES } from "@/lib/staples"
 
 export type ShoppingListWithItems = ShoppingList & { items: ShoppingItem[] }
-
-// ─── Staple defaults ──────────────────────────────────────────────────────────
-
-const STAPLES: { category: string; name: string }[] = [
-  { category: "Молочне та яйця", name: "Молоко 3-4 л" },
-  { category: "Молочне та яйця", name: "Яйця 2-3 десятки" },
-  { category: "Молочне та яйця", name: "Сир твердий" },
-  { category: "Молочне та яйця", name: "Творог" },
-  { category: "Молочне та яйця", name: "Йогурт грецький" },
-  { category: "Молочне та яйця", name: "Кефір" },
-  { category: "Молочне та яйця", name: "Вершкове масло" },
-  { category: "Білок", name: "Куряче філе або стегна" },
-  { category: "Білок", name: "Яловичина або фарш" },
-  { category: "Білок", name: "Риба заморожена" },
-  { category: "Крупи та паста", name: "Вівсянка" },
-  { category: "Крупи та паста", name: "Рис" },
-  { category: "Крупи та паста", name: "Гречка" },
-  { category: "Крупи та паста", name: "Макарони" },
-  { category: "Крупи та паста", name: "Картопля" },
-  { category: "Крупи та паста", name: "Хліб" },
-  { category: "Горіхи та олія", name: "Горіхи мікс" },
-  { category: "Горіхи та олія", name: "Арахісова паста" },
-  { category: "Горіхи та олія", name: "Оливкова олія" },
-  { category: "Горіхи та олія", name: "Мед" },
-  { category: "Фрукти та овочі", name: "Банани 7-10 шт" },
-  { category: "Фрукти та овочі", name: "Сухофрукти (фініки, родзинки, курага)" },
-  { category: "Фрукти та овочі", name: "Овочі для гарніру" },
-]
 
 async function createListWithStaples(userId: string): Promise<ShoppingListWithItems> {
   const list = await db.shoppingList.create({

@@ -28,6 +28,7 @@ model User {
   shoppingLists ShoppingList[]
   weightEntries WeightEntry[]
   measurements  BodyMeasurement[]
+  weeklyPlans   WeeklyPlan[]
 
   @@map("users")
 }
@@ -103,9 +104,10 @@ model MealSlot {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  slotDishes SlotDish[]
-  mealLogs   MealLog[]
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slotDishes    SlotDish[]
+  mealLogs      MealLog[]
+  plannedDishes PlannedDish[]
 
   @@map("meal_slots")
 }
@@ -201,6 +203,50 @@ model ShoppingItem {
   list ShoppingList @relation(fields: [listId], references: [id], onDelete: Cascade)
 
   @@map("shopping_items")
+}
+
+enum PlanStatus {
+  draft
+  approved
+  archived
+}
+
+model WeeklyPlan {
+  id        String     @id @default(cuid())
+  userId    String     @map("user_id")
+  weekStart DateTime   @db.Date
+  status    PlanStatus @default(draft)
+  userNotes String?    @map("user_notes") @db.Text
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plannedDishes PlannedDish[]
+
+  @@unique([userId, weekStart])
+  @@map("weekly_plans")
+}
+
+model PlannedDish {
+  id          String  @id @default(cuid())
+  planId      String  @map("plan_id")
+  slotId      String  @map("slot_id")
+  dayOfWeek   Int     @map("day_of_week")
+  name        String
+  kcal        Int
+  proteins    Int?
+  fats        Int?
+  carbs       Int?
+  cookTime      Int?    @map("cook_time")
+  portionWeight Int?    @map("portion_weight")
+  ingredients   Json
+  steps         Json
+
+  plan WeeklyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  slot MealSlot   @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, slotId, dayOfWeek])
+  @@map("planned_dishes")
 }
 
 model WeightEntry {

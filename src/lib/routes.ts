@@ -7,4 +7,5 @@ export const routes = {
   purchase: "/purchase",
   settings: "/settings",
   nutritionSlots: "/nutrition/slots",
+  plan: "/plan",
 } as const

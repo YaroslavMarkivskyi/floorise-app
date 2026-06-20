@@ -4,6 +4,8 @@ import { db } from "@/lib/db"
 import { getUserSlots, getRotatedDish, getOrCreateMealLog, getDayLogs, getStreak } from "@/lib/nutrition"
 import { TodayView } from "@/components/TodayView"
 import { routes } from "@/lib/routes"
+import { getApprovedPlan, getDraftPlan, getWeekStart, getDayOfWeek } from "@/lib/plan"
+import type { PlannedDish } from "@/generated/prisma/client"
 
 function utcToday(timezone: string): Date {
   const now = new Date()
@@ -34,29 +36,74 @@ export default async function TodayPage() {
     month: "long",
   }).format(new Date())
 
-  const [slots, dayLogs, streak] = await Promise.all([
+  const weekStart = getWeekStart(today, timezone)
+  const dayOfWeek = getDayOfWeek(today, timezone)
+
+  const [slots, dayLogs, streak, approvedPlan, draftPlan] = await Promise.all([
     getUserSlots(userId),
     getDayLogs(userId, today),
     getStreak(userId, today),
+    getApprovedPlan(userId, weekStart),
+    getDraftPlan(userId, weekStart),
   ])
+
+  // Priority for dish source: MealLog.chosenDishId > approved plan > draft plan > rotation
+  function getPlanDish(slotId: string): PlannedDish | null {
+    const plan = approvedPlan ?? draftPlan
+    if (!plan) return null
+    return plan.plannedDishes.find((d) => d.slotId === slotId && d.dayOfWeek === dayOfWeek) ?? null
+  }
 
   const slotItems = await Promise.all(
     slots.map(async (slot) => {
-      const dish = getRotatedDish(slot, today)
       const existingLog = dayLogs.find((l) => l.slotId === slot.id)
       const log = existingLog ?? (await getOrCreateMealLog(userId, today, slot.id))
-      const activeDish = log.chosenDishId
-        ? (slot.slotDishes.find((sd) => sd.dishId === log.chosenDishId)?.dish ?? dish)
-        : dish
+
+      // 1. Manual override from per-slot regen
+      if (log.chosenDishId) {
+        const overrideDish = await db.dish.findUnique({ where: { id: log.chosenDishId } })
+        if (overrideDish) {
+          return {
+            slotId: slot.id,
+            slotTime: slot.time,
+            slotName: slot.name,
+            dishName: overrideDish.name,
+            dishKcal: overrideDish.kcal,
+            dishCookTime: overrideDish.cookTime ?? null,
+            dishIngredients: (overrideDish.ingredients as string[]) ?? [],
+            dishSteps: (overrideDish.steps as string[]) ?? [],
+            initialDone: log.done,
+          }
+        }
+      }
+
+      // 2. Weekly plan (approved or draft)
+      const planDish = getPlanDish(slot.id)
+      if (planDish) {
+        return {
+          slotId: slot.id,
+          slotTime: slot.time,
+          slotName: slot.name,
+          dishName: planDish.name,
+          dishKcal: planDish.kcal,
+          dishCookTime: planDish.cookTime ?? null,
+          dishIngredients: (planDish.ingredients as string[]) ?? [],
+          dishSteps: (planDish.steps as string[]) ?? [],
+          initialDone: log.done,
+        }
+      }
+
+      // 3. Default rotation
+      const dish = getRotatedDish(slot, today)
       return {
         slotId: slot.id,
         slotTime: slot.time,
         slotName: slot.name,
-        dishName: activeDish?.name ?? "—",
-        dishKcal: activeDish?.kcal ?? 0,
-        dishCookTime: activeDish?.cookTime ?? null,
-        dishIngredients: (activeDish?.ingredients as string[] | null) ?? [],
-        dishSteps: (activeDish?.steps as string[] | null) ?? [],
+        dishName: dish?.name ?? "—",
+        dishKcal: dish?.kcal ?? 0,
+        dishCookTime: dish?.cookTime ?? null,
+        dishIngredients: (dish?.ingredients as string[] | null) ?? [],
+        dishSteps: (dish?.steps as string[] | null) ?? [],
         initialDone: log.done,
       }
     }),
