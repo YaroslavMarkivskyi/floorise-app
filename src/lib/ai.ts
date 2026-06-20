@@ -1,28 +1,67 @@
+import OpenAI from "openai"
 import "server-only"
+import { z } from "zod"
 
-// Anthropic API wrapper — server-side only.
-// Key is read from process.env.ANTHROPIC_API_KEY; never expose to client.
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
-export async function generateDish(prompt: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    signal,
-    headers: {
-      "x-api-key": process.env.ANTHROPIC_API_KEY!,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  })
+const dishSchema = z.object({
+  name: z.string().min(1),
+  kcal: z.number().int().positive(),
+  cookTime: z.string().min(1),
+  ingredients: z.array(z.string()).min(1),
+  steps: z.array(z.string()).min(1),
+})
 
-  if (!res.ok) {
-    throw new Error(`Anthropic API error: ${res.status}`)
+export type GeneratedDish = z.infer<typeof dishSchema>
+
+export async function regenerateDish(params: {
+  slotName: string
+  slotTime: string
+  targetKcal: number
+  currentDishName: string
+  fromStock?: string[]
+}): Promise<GeneratedDish | null> {
+  const { slotName, slotTime, targetKcal, currentDishName, fromStock } = params
+
+  const stockLine =
+    fromStock && fromStock.length > 0
+      ? `Використовуй переважно ці продукти: ${fromStock.join(", ")}.`
+      : ""
+
+  const userPrompt = [
+    `Прийом їжі: ${slotName} (${slotTime}).`,
+    `Цільова калорійність: ${targetKcal} ккал (±40 ккал).`,
+    `Поточна страва (яку треба замінити): ${currentDishName}.`,
+    stockLine,
+    `Запропонуй ІНШУ страву. Відповідай ВИКЛЮЧНО JSON:`,
+    `{ "name": string, "kcal": number, "cookTime": string, "ingredients": string[], "steps": string[] }`,
+  ]
+    .filter(Boolean)
+    .join(" ")
+
+  try {
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 600,
+      temperature: 0.8,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: "Ти кулінарний помічник. Відповідай ВИКЛЮЧНО валідним JSON.",
+        },
+        { role: "user", content: userPrompt },
+      ],
+    })
+
+    const raw = response.choices[0]?.message?.content
+    if (!raw) return null
+
+    const parsed = dishSchema.safeParse(JSON.parse(raw))
+    if (!parsed.success) return null
+
+    return parsed.data
+  } catch {
+    return null
   }
-
-  const data = (await res.json()) as { content: Array<{ type: string; text: string }> }
-  return data.content[0]?.text ?? ""
 }

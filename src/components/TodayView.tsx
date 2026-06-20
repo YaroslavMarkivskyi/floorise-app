@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { toggleMealDone } from "@/actions/nutrition"
 import { RecipeDrawer } from "@/components/RecipeDrawer"
+import { RegenButton } from "@/components/RegenButton"
 import type { DishRecipe } from "@/types"
 
 export interface SlotItem {
@@ -31,6 +32,7 @@ export function TodayView({ slots, dateIso, kcalFloor, kcalTarget, dateLabel, in
     () => Object.fromEntries(slots.map((s) => [s.slotId, s.initialDone])),
   )
   const [selectedDish, setSelectedDish] = useState<DishRecipe | null>(null)
+  const [fromStock, setFromStock] = useState(false)
 
   async function handleToggle(slotId: string) {
     const next = !doneMap[slotId]
@@ -117,6 +119,17 @@ export function TodayView({ slots, dateIso, kcalFloor, kcalTarget, dateLabel, in
           </div>
         </div>
 
+        {/* fromStock toggle */}
+        <label className="flex cursor-pointer items-center gap-2.5 self-start">
+          <input
+            type="checkbox"
+            checked={fromStock}
+            onChange={(e) => setFromStock(e.target.checked)}
+            className="h-4 w-4 rounded border-zinc-300 accent-zinc-900"
+          />
+          <span className="text-sm text-zinc-600">З наявних продуктів</span>
+        </label>
+
         {/* Meal slots */}
         <div className="space-y-3">
           {slots.map((s) => {
@@ -149,6 +162,9 @@ export function TodayView({ slots, dateIso, kcalFloor, kcalTarget, dateLabel, in
                       >
                         Рецепт →
                       </button>
+                    </div>
+                    <div className="mt-2">
+                      <RegenButton slotId={s.slotId} date={dateIso} fromStock={fromStock} />
                     </div>
                   </div>
 
