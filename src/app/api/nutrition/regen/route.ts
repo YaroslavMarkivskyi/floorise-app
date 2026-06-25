@@ -6,7 +6,8 @@ import { db } from "@/lib/db"
 import { regenerateDish } from "@/lib/ai"
 import { checkAndDecrement } from "@/lib/regen-quota"
 import { getUserSlots, getRotatedDish } from "@/lib/nutrition"
-import { getActiveList } from "@/lib/purchase"
+import { getOrCreateListForWeek } from "@/lib/purchase"
+import { getWeekStart } from "@/lib/plan"
 
 const bodySchema = z.object({
   slotId: z.string().min(1),
@@ -59,12 +60,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const fullSlot = slots.find((s) => s.id === slotId)
   const currentDish = log?.chosenDish ?? (fullSlot ? getRotatedDish(fullSlot, dateObj) : null)
 
-  // fromStock — unchecked items from active shopping list
+  // fromStock — unchecked items from this week's shopping list
   const fromStockParam = new URL(req.url).searchParams.get("fromStock") === "true"
   let fromStock: string[] | undefined
   if (fromStockParam) {
-    const activeList = await getActiveList(userId)
-    fromStock = activeList?.items.filter((i) => !i.checked).map((i) => i.name)
+    const profile = await db.profile.findUnique({ where: { userId }, select: { timezone: true } })
+    const weekStart = getWeekStart(new Date(), profile?.timezone ?? "Europe/Kyiv")
+    const weekList = await getOrCreateListForWeek(userId, weekStart)
+    fromStock = weekList.items.filter((i) => !i.checked).map((i) => i.name)
   }
 
   const generated = await regenerateDish({

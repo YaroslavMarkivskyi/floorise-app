@@ -181,6 +181,7 @@ enum ItemSource {
 model ShoppingList {
   id        String     @id @default(cuid())
   userId    String     @map("user_id")
+  weekStart DateTime   @db.Date @map("week_start")
   status    ListStatus @default(active)
   createdAt DateTime   @default(now()) @map("created_at")
   closedAt  DateTime?  @map("closed_at")
@@ -188,6 +189,7 @@ model ShoppingList {
   user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   items ShoppingItem[]
 
+  @@unique([userId, weekStart])
   @@map("shopping_lists")
 }
 

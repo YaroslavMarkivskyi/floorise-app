@@ -6,7 +6,7 @@ import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { generateWeeklyPlan, regenerateSinglePlannedDish } from "@/lib/ai-weekly"
 import { getWeekStart } from "@/lib/plan"
-import { getActiveList } from "@/lib/purchase"
+import { getOrCreateListForWeek } from "@/lib/purchase"
 import { STAPLES } from "@/lib/staples"
 
 export type PlanActionState = { error: string } | { success: true } | null
@@ -145,41 +145,6 @@ export async function approvePlan(planId: string): Promise<void> {
       where: { id: planId },
       data: { status: "approved" },
     })
-
-    // Archive active shopping list
-    await tx.shoppingList.updateMany({
-      where: { userId, status: "active" },
-      data: { status: "done", closedAt: new Date() },
-    })
-
-    // Aggregate ingredients from all planned dishes (deduplicate by lowercase name)
-    const seen = new Set<string>()
-    const mealItems: { name: string; category: string; source: "meal_sync" }[] = []
-    for (const dish of plan.plannedDishes) {
-      const ingredients = dish.ingredients as string[]
-      for (const ing of ingredients) {
-        const key = ing.trim().toLowerCase()
-        if (!seen.has(key)) {
-          seen.add(key)
-          mealItems.push({ name: ing.trim(), category: "З плану тижня", source: "meal_sync" })
-        }
-      }
-    }
-
-    // Create new shopping list with plan ingredients + staples
-    await tx.shoppingList.create({
-      data: {
-        userId,
-        items: {
-          createMany: {
-            data: [
-              ...mealItems,
-              ...STAPLES.map((s) => ({ ...s, source: "staple" as const })),
-            ],
-          },
-        },
-      },
-    })
   })
 
   revalidatePath("/plan")
@@ -229,11 +194,14 @@ export async function regenPlanSlot(
     where: { planId_slotId_dayOfWeek: { planId, slotId, dayOfWeek } },
   })
 
-  // Approved plan: always fromStock
+  // Approved plan: suggest from this week's unchecked shopping list
   let fromStock: string[] | undefined
   if (plan.status === "approved") {
-    const activeList = await getActiveList(userId)
-    fromStock = activeList?.items.filter((i) => !i.checked).map((i) => i.name)
+    const fullPlan = await db.weeklyPlan.findUnique({ where: { id: planId }, select: { weekStart: true } })
+    if (fullPlan) {
+      const weekList = await getOrCreateListForWeek(userId, fullPlan.weekStart)
+      fromStock = weekList.items.filter((i: { checked: boolean; name: string }) => !i.checked).map((i: { name: string }) => i.name)
+    }
   }
 
   const generated = await regenerateSinglePlannedDish({

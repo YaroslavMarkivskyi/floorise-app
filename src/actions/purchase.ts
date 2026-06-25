@@ -1,45 +1,17 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { z } from "zod"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import type { ShoppingList, ShoppingItem } from "@/generated/prisma/client"
+import { getWeekStart } from "@/lib/plan"
+import { getOrCreateListForWeek } from "@/lib/purchase"
 import { STAPLES } from "@/lib/staples"
+import type { ShoppingList, ShoppingItem } from "@/generated/prisma/client"
 
 export type ShoppingListWithItems = ShoppingList & { items: ShoppingItem[] }
-
-async function createListWithStaples(userId: string): Promise<ShoppingListWithItems> {
-  const list = await db.shoppingList.create({
-    data: {
-      userId,
-      items: {
-        createMany: {
-          data: STAPLES.map((s) => ({ ...s, source: "staple" })),
-        },
-      },
-    },
-    include: { items: true },
-  })
-  return list
-}
-
-// ─── getOrCreateActiveList ────────────────────────────────────────────────────
-
-export async function getOrCreateActiveList(userId: string): Promise<ShoppingListWithItems> {
-  const existing = await db.shoppingList.findFirst({
-    where: { userId, status: "active" },
-    include: { items: { orderBy: [{ category: "asc" }, { name: "asc" }] } },
-  })
-  if (existing) return existing
-  return createListWithStaples(userId)
-}
+export type PurchaseActionState = { error: string } | { success: true } | null
 
 // ─── toggleItem ───────────────────────────────────────────────────────────────
-
-const toggleSchema = z.object({ itemId: z.string().min(1) })
-
-export type PurchaseActionState = { error: string } | { success: true } | null
 
 export async function toggleItem(
   _prevState: PurchaseActionState,
@@ -48,11 +20,11 @@ export async function toggleItem(
   const session = await auth()
   if (!session?.user?.id) return { error: "Не авторизовано" }
 
-  const parsed = toggleSchema.safeParse({ itemId: formData.get("itemId") })
-  if (!parsed.success) return { error: "Невірні дані" }
+  const itemId = formData.get("itemId") as string | null
+  if (!itemId) return { error: "Невірні дані" }
 
   const item = await db.shoppingItem.findUnique({
-    where: { id: parsed.data.itemId },
+    where: { id: itemId },
     include: { list: { select: { userId: true } } },
   })
   if (!item || item.list.userId !== session.user.id) return { error: "Не знайдено" }
@@ -66,68 +38,170 @@ export async function toggleItem(
   return { success: true }
 }
 
-// ─── closeList ────────────────────────────────────────────────────────────────
+// ─── addItem ──────────────────────────────────────────────────────────────────
 
-const listIdSchema = z.object({ listId: z.string().min(1) })
+export async function addItem(
+  _prevState: PurchaseActionState,
+  formData: FormData,
+): Promise<PurchaseActionState> {
+  const session = await auth()
+  if (!session?.user?.id) return { error: "Не авторизовано" }
+  const userId = session.user.id
 
-export async function closeList(
+  const name = (formData.get("name") as string | null)?.trim()
+  if (!name) return { error: "Введіть назву" }
+
+  const weekStartIso = formData.get("weekStart") as string | null
+  if (!weekStartIso) return { error: "Невірні дані" }
+  const weekStart = new Date(`${weekStartIso}T00:00:00.000Z`)
+
+  const list = await getOrCreateListForWeek(userId, weekStart)
+
+  await db.shoppingItem.create({
+    data: { listId: list.id, name, source: "staple" },
+  })
+
+  revalidatePath("/purchase")
+  return { success: true }
+}
+
+// ─── deleteItem ───────────────────────────────────────────────────────────────
+
+export async function deleteItem(
   _prevState: PurchaseActionState,
   formData: FormData,
 ): Promise<PurchaseActionState> {
   const session = await auth()
   if (!session?.user?.id) return { error: "Не авторизовано" }
 
-  const parsed = listIdSchema.safeParse({ listId: formData.get("listId") })
-  if (!parsed.success) return { error: "Невірні дані" }
+  const itemId = (formData.get("itemId") as string | null)?.trim()
+  if (!itemId) return { error: "Невірні дані" }
 
-  const list = await db.shoppingList.findUnique({
-    where: { id: parsed.data.listId },
-    select: { userId: true },
+  const item = await db.shoppingItem.findUnique({
+    where: { id: itemId },
+    include: { list: { select: { userId: true } } },
   })
-  if (!list || list.userId !== session.user.id) return { error: "Не знайдено" }
+  if (!item || item.list.userId !== session.user.id) return { error: "Не знайдено" }
 
-  await db.shoppingList.update({
-    where: { id: parsed.data.listId },
-    data: { status: "done", closedAt: new Date() },
-  })
+  await db.shoppingItem.delete({ where: { id: itemId } })
 
   revalidatePath("/purchase")
   return { success: true }
 }
 
-// ─── createNewList ────────────────────────────────────────────────────────────
+// ─── finishTrip ───────────────────────────────────────────────────────────────
 
-export async function createNewList(
-  _prevState: PurchaseActionState,
-  _formData: FormData,
-): Promise<PurchaseActionState> {
-  const session = await auth()
-  if (!session?.user?.id) return { error: "Не авторизовано" }
-  const userId = session.user.id
-
-  await db.shoppingList.updateMany({
-    where: { userId, status: "active" },
-    data: { status: "done", closedAt: new Date() },
-  })
-
-  await createListWithStaples(userId)
-
-  revalidatePath("/purchase")
-  return { success: true }
-}
-
-// ─── finishTrip — form action without prevState ───────────────────────────────
-
-export async function finishTrip(_formData: FormData): Promise<void> {
+export async function finishTrip(formData: FormData): Promise<void> {
   const session = await auth()
   if (!session?.user?.id) return
   const userId = session.user.id
 
+  const weekStartIso = formData.get("weekStart") as string | null
+  if (!weekStartIso) return
+  const weekStart = new Date(`${weekStartIso}T00:00:00.000Z`)
+
   await db.shoppingList.updateMany({
-    where: { userId, status: "active" },
+    where: { userId, weekStart },
     data: { status: "done", closedAt: new Date() },
   })
 
-  await createListWithStaples(userId)
   revalidatePath("/purchase")
+}
+
+// ─── syncFromPlan ─────────────────────────────────────────────────────────────
+
+export async function syncFromPlan(formData: FormData): Promise<void> {
+  const session = await auth()
+  if (!session?.user?.id) return
+  const userId = session.user.id
+
+  const weekStartIso = formData.get("weekStart") as string | null
+  if (!weekStartIso) return
+  const weekStart = new Date(`${weekStartIso}T00:00:00.000Z`)
+
+  const plan = await db.weeklyPlan.findFirst({
+    where: { userId, weekStart, status: "approved" },
+    include: {
+      plannedDishes: {
+        select: {
+          id: true,
+          name: true,
+          kcal: true,
+          cookTime: true,
+          ingredients: true,
+        },
+      },
+    },
+  })
+  if (!plan) return
+
+  // Generate missing recipes in parallel batches of 5
+  const { generateDishRecipe } = await import("@/lib/ai-weekly")
+
+  const missing = plan.plannedDishes.filter(
+    (d) => (d.ingredients as string[]).length === 0,
+  )
+
+  const BATCH = 5
+  for (let i = 0; i < missing.length; i += BATCH) {
+    const batch = missing.slice(i, i + BATCH)
+    await Promise.all(
+      batch.map(async (dish) => {
+        const recipe = await generateDishRecipe({
+          name: dish.name as string,
+          kcal: dish.kcal as number,
+          cookTime: dish.cookTime ? `${dish.cookTime} хв` : null,
+        })
+        if (!recipe) return
+        await db.plannedDish.update({
+          where: { id: dish.id },
+          data: {
+            portionWeight: recipe.portionWeight,
+            ingredients: recipe.ingredients,
+            steps: recipe.steps,
+          },
+        })
+        // Update in-memory so we pick up the freshly generated ingredients below
+        dish.ingredients = recipe.ingredients as unknown as typeof dish.ingredients
+      }),
+    )
+  }
+
+  // Collect all ingredients from all dishes
+  const rawIngredients: string[] = []
+  for (const dish of plan.plannedDishes) {
+    rawIngredients.push(...(dish.ingredients as string[]).filter((s) => s.trim().length > 0))
+  }
+  if (rawIngredients.length === 0) return
+
+  const list = await getOrCreateListForWeek(userId, weekStart)
+
+  // Remove previously synced plan items before re-syncing
+  await db.shoppingItem.deleteMany({ where: { listId: list.id, source: "meal_sync" } })
+
+  const { aggregateShoppingList } = await import("@/lib/ai-purchase")
+  const aggregated = await aggregateShoppingList(rawIngredients)
+  if (aggregated.length === 0) return
+
+  await db.shoppingItem.createMany({
+    data: aggregated.map((item) => ({
+      listId: list.id,
+      name: item.name,
+      qty: item.qty ?? undefined,
+      category: "З плану тижня",
+      source: "meal_sync" as const,
+    })),
+  })
+
+  revalidatePath("/purchase")
+  revalidatePath("/plan")
+}
+
+// ─── getOrCreateActiveList (kept for compat) ──────────────────────────────────
+
+export async function getOrCreateActiveList(userId: string): Promise<ShoppingListWithItems> {
+  const profile = await db.profile.findUnique({ where: { userId }, select: { timezone: true } })
+  const tz = profile?.timezone ?? "Europe/Kyiv"
+  const weekStart = getWeekStart(new Date(), tz)
+  return getOrCreateListForWeek(userId, weekStart)
 }

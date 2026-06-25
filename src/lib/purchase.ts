@@ -1,33 +1,46 @@
 import { db } from "@/lib/db"
+import { STAPLES } from "@/lib/staples"
 import type { ShoppingList, ShoppingItem } from "@/generated/prisma/client"
 
-export type ShoppingListWithItems = ShoppingList & {
-  items: ShoppingItem[]
-}
+export type ShoppingListWithItems = ShoppingList & { items: ShoppingItem[] }
 
-export async function getActiveList(userId: string): Promise<ShoppingListWithItems | null> {
-  return db.shoppingList.findFirst({
-    where: { userId, status: "active" },
-    include: {
-      items: { orderBy: [{ category: "asc" }, { name: "asc" }] },
+export async function getOrCreateListForWeek(
+  userId: string,
+  weekStart: Date,
+): Promise<ShoppingListWithItems> {
+  const existing = await db.shoppingList.findUnique({
+    where: { userId_weekStart: { userId, weekStart } },
+    include: { items: { orderBy: [{ category: "asc" }, { name: "asc" }] } },
+  })
+  if (existing) return existing
+
+  return db.shoppingList.create({
+    data: {
+      userId,
+      weekStart,
+      items: { createMany: { data: STAPLES.map((s) => ({ ...s, source: "staple" })) } },
     },
+    include: { items: { orderBy: [{ category: "asc" }, { name: "asc" }] } },
   })
 }
 
-export async function getPreviousList(userId: string): Promise<ShoppingListWithItems | null> {
-  return db.shoppingList.findFirst({
-    where: { userId, status: "done" },
-    orderBy: { closedAt: "desc" },
-    include: {
-      items: { orderBy: [{ category: "asc" }, { name: "asc" }] },
-    },
+export async function getListForWeek(
+  userId: string,
+  weekStart: Date,
+): Promise<ShoppingListWithItems | null> {
+  return db.shoppingList.findUnique({
+    where: { userId_weekStart: { userId, weekStart } },
+    include: { items: { orderBy: [{ category: "asc" }, { name: "asc" }] } },
   })
 }
 
-export async function getListHistory(userId: string): Promise<ShoppingListWithItems[]> {
+/** All weeks that have a list, newest first */
+export async function getListWeeks(
+  userId: string,
+): Promise<Pick<ShoppingList, "weekStart">[]> {
   return db.shoppingList.findMany({
-    where: { userId, status: "done" },
-    orderBy: { createdAt: "desc" },
-    include: { items: true },
+    where: { userId },
+    orderBy: { weekStart: "desc" },
+    select: { weekStart: true },
   })
 }
