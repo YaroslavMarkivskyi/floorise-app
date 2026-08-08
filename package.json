@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && (test \"$VERCEL_ENV\" != production || prisma migrate deploy) && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
