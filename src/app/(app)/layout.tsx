@@ -8,7 +8,7 @@ import { hasDraftPlan } from "@/lib/plan"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth()
-  if (!session) redirect(routes.login)
+  if (!session?.user?.id) redirect(routes.login)
   const userId = session.user.id
 
   const profile = await db.profile.findUnique({

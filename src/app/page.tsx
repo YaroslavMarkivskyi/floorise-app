@@ -4,5 +4,5 @@ import { routes } from "@/lib/routes"
 
 export default async function RootPage() {
   const session = await auth()
-  redirect(session ? routes.today : routes.login)
+  redirect(session?.user?.id ? routes.today : routes.login)
 }
