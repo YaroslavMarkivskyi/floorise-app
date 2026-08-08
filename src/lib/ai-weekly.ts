@@ -2,7 +2,11 @@ import OpenAI from "openai"
 import "server-only"
 import { z } from "zod"
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+let _client: OpenAI | null = null
+function getClient(): OpenAI {
+  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  return _client
+}
 
 export interface SlotSpec {
   slotId: string
@@ -92,7 +96,7 @@ ${notesLine}
   const abort = AbortSignal.timeout(90_000)
 
   try {
-    const response = await client.chat.completions.create(
+    const response = await getClient().chat.completions.create(
       {
         model: "gpt-4o-mini",
         max_tokens: 4000,
@@ -153,7 +157,7 @@ export async function generateDishRecipe(params: {
   const abort = AbortSignal.timeout(30_000)
 
   try {
-    const response = await client.chat.completions.create(
+    const response = await getClient().chat.completions.create(
       {
         model: "gpt-4o-mini",
         max_tokens: 800,
@@ -214,7 +218,7 @@ export async function regenerateSinglePlannedDish(params: {
     .join(" ")
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await getClient().chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 600,
       temperature: 0.8,

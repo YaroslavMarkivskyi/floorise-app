@@ -2,7 +2,11 @@ import OpenAI from "openai"
 import "server-only"
 import { z } from "zod"
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+let _client: OpenAI | null = null
+function getClient(): OpenAI {
+  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  return _client
+}
 
 const dishSchema = z.object({
   name: z.string().min(1),
@@ -40,7 +44,7 @@ export async function regenerateDish(params: {
     .join(" ")
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await getClient().chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 600,
       temperature: 0.8,
