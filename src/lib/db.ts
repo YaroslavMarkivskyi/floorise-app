@@ -20,6 +20,22 @@ function createPrismaClient() {
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient }
 
-export const db = globalForPrisma.prisma ?? createPrismaClient()
+let _db: PrismaClient | undefined
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = db
+function getDb(): PrismaClient {
+  if (!_db) {
+    _db = globalForPrisma.prisma ?? createPrismaClient()
+    if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = _db
+  }
+  return _db
+}
+
+// Proxy defers real Prisma initialization until the first property access,
+// so importing this module never throws on a missing DATABASE_URL (e.g.
+// during Next.js "Collecting page data" at build time). All existing
+// `db.xxx.yyy(...)` call sites keep working unchanged.
+export const db = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    return Reflect.get(getDb(), prop as keyof PrismaClient)
+  },
+})
