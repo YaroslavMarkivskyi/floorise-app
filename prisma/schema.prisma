@@ -239,10 +239,11 @@ model PlannedDish {
   proteins    Int?
   fats        Int?
   carbs       Int?
-  cookTime      Int?    @map("cook_time")
-  portionWeight Int?    @map("portion_weight")
+  cookTime      Int?       @map("cook_time")
+  portionWeight Int?       @map("portion_weight")
   ingredients   Json
   steps         Json
+  source        DishSource @default(ai)
 
   plan WeeklyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
   slot MealSlot   @relation(fields: [slotId], references: [id], onDelete: Cascade)
@@ -278,4 +279,74 @@ model BodyMeasurement {
 
   @@unique([userId, date])
   @@map("body_measurements")
+}
+
+// ─── Recipe catalog (global, shared across users) ─────────────────────────────
+
+model Recipe {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  cookingTime Int?
+  servings    Int?
+  kcal        Int?
+  protein     Float?
+  fat         Float?
+  carbs       Float?
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+
+  ingredients RecipeIngredient[]
+  steps       RecipeStep[]
+  tags        RecipeTag[]
+
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id       String  @id @default(cuid())
+  recipeId String
+  name     String
+  quantity Float?
+  unit     String?
+  position Int
+
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([recipeId])
+  @@index([name])
+  @@map("recipe_ingredients")
+}
+
+model RecipeStep {
+  id          String  @id @default(cuid())
+  recipeId    String
+  position    Int
+  description String  @db.Text
+  imageUrl    String?
+
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@unique([recipeId, position])
+  @@map("recipe_steps")
+}
+
+model Tag {
+  id   String @id @default(cuid())
+  name String @unique
+
+  recipes RecipeTag[]
+
+  @@map("tags")
+}
+
+model RecipeTag {
+  recipeId String
+  tagId    String
+
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([recipeId, tagId])
+  @@map("recipe_tags")
 }

@@ -11,6 +11,7 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:seed-recipes": "tsx prisma/seed-recipes.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
+    "tsx": "^4.23.11",
     "typescript": "^5"
   },
   "pnpm": {

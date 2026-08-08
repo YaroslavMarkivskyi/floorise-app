@@ -68,9 +68,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               dayOfWeek: d.dayOfWeek,
               name: d.name,
               kcal: d.kcal,
-              cookTime: parseCookTime(d.cookTime),
-              ingredients: [],
-              steps: [],
+              proteins: d.proteins,
+              fats: d.fats,
+              carbs: d.carbs,
+              cookTime: d.cookTime,
+              ingredients: d.ingredients,
+              steps: d.steps,
+              source: d.source,
             })),
           },
         },
@@ -80,9 +84,4 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json({ generated, failed })
-}
-
-function parseCookTime(raw: string): number | null {
-  const match = raw.match(/\d+/)
-  return match ? parseInt(match[0], 10) : null
 }

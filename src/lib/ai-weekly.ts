@@ -1,6 +1,8 @@
 import OpenAI from "openai"
 import "server-only"
 import { z } from "zod"
+import { db } from "@/lib/db"
+import { hasHardToChewIngredient } from "@/lib/dietary-filters"
 
 let _client: OpenAI | null = null
 function getClient(): OpenAI {
@@ -46,7 +48,23 @@ const weeklyPlanSchema = z.object({
 
 export type PlannedDishAI = z.infer<typeof plannedDishSchema>
 
-export async function generateWeeklyPlan(params: {
+// Final dish shape returned to callers: cookTime already parsed to minutes,
+// ingredients/steps as plain string arrays, and the origin marked via `source`.
+export interface WeeklyPlanDish {
+  slotId: string
+  dayOfWeek: number
+  name: string
+  kcal: number
+  proteins: number
+  fats: number
+  carbs: number
+  cookTime: number | null
+  ingredients: string[]
+  steps: string[]
+  source: "seed" | "ai"
+}
+
+async function generateWeeklyPlanAI(params: {
   slots: SlotSpec[]
   kcalFloor: number
   kcalTarget: number
@@ -133,6 +151,173 @@ ${notesLine}
     console.error("[ai-weekly] generateWeeklyPlan error:", err)
     return null
   }
+}
+
+// ─── Catalog-backed weekly plan ───────────────────────────────────────────────
+
+// The data uses three different apostrophe glyphs for "м'ясо" — match them all.
+const MEAT_TAGS = ["м’ясо", "м'ясо", "мʼясо"]
+
+const BREAKFAST_TAGS = ["сніданок", "випічка", "оладки", "сирники", "млинці", "запіканка"]
+const SNACK_TAGS = [
+  "закуска", "закуски", "десерт", "салат", "салати", "фрукти", "ягоди",
+  "напої", "напій", "коктейль", "смузі", "перекус", "сендвіч",
+]
+const LUNCH_TAGS = [
+  "перша страва", "перші страви", "суп", "супи", "борщ", "крем-суп",
+  "основна страва", "основні страви", "гарнір", "риба", "птиця", "курка", "паста",
+  ...MEAT_TAGS,
+]
+const DINNER_TAGS = [
+  "вечеря", "основна страва", "основні страви", "риба", "морепродукти",
+  "птиця", "курка", "салат", "овочі", "гарнір", ...MEAT_TAGS,
+]
+const LATE_TAGS = ["десерт", "салат", "напої", "коктейль", "сир", "протеїн", "закуска"]
+const DEFAULT_TAGS = ["основні страви", "основна страва", "салат", "суп", "гарнір", "риба", ...MEAT_TAGS]
+
+function acceptedTagsForSlot(slotName: string): string[] {
+  const n = slotName.trim().toLowerCase()
+  if (n.includes("сніда")) return BREAKFAST_TAGS
+  if (n.includes("обід")) return LUNCH_TAGS
+  if (n.includes("вечер")) return DINNER_TAGS
+  if (n.includes("сном") || n.includes("ніч")) return LATE_TAGS
+  if (n.includes("перекус") || n.includes("снек") || n.includes("ланч")) return SNACK_TAGS
+  return DEFAULT_TAGS
+}
+
+// Minimal structural shape of a catalog recipe row with its relations.
+interface CatalogRecipe {
+  slug: string
+  title: string
+  kcal: number | null
+  protein: number | null
+  fat: number | null
+  carbs: number | null
+  cookingTime: number | null
+  ingredients: { name: string; quantity: number | null; unit: string | null }[]
+  steps: { description: string }[]
+}
+
+function formatIngredient(i: { name: string; quantity: number | null; unit: string | null }): string {
+  const parts = [i.name.trim()]
+  if (i.quantity != null) parts.push(String(i.quantity))
+  if (i.unit && i.unit.trim()) parts.push(i.unit.trim())
+  return parts.join(" ")
+}
+
+function catalogToDish(r: CatalogRecipe, slotId: string, dayOfWeek: number): WeeklyPlanDish {
+  return {
+    slotId,
+    dayOfWeek,
+    name: r.title,
+    kcal: r.kcal ?? 0,
+    proteins: Math.round(r.protein ?? 0),
+    fats: Math.round(r.fat ?? 0),
+    carbs: Math.round(r.carbs ?? 0),
+    cookTime: r.cookingTime ?? null,
+    ingredients: r.ingredients.map(formatIngredient),
+    steps: r.steps.map((s) => s.description),
+    source: "seed",
+  }
+}
+
+function shuffle<T>(arr: T[]): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+}
+
+function parseCookTimeStr(raw: string): number | null {
+  const match = raw.match(/\d+/)
+  return match ? parseInt(match[0], 10) : null
+}
+
+/**
+ * Build a weekly plan, preferring dishes from the recipe catalog and falling
+ * back to OpenAI only for slot/day cells the catalog cannot fill.
+ *
+ * Catalog selection per slot: recipes tagged for that meal, with per-portion
+ * kcal within ±15% of the slot target, excluding anything containing a
+ * hard-to-chew ingredient, and without repeating a recipe across the week.
+ */
+export async function generateWeeklyPlan(params: {
+  slots: SlotSpec[]
+  kcalFloor: number
+  kcalTarget: number
+  userNotes?: string
+  fromStock?: string[]
+}): Promise<WeeklyPlanDish[] | null> {
+  const { slots } = params
+  const DAYS = 7
+  const usedSlugs = new Set<string>()
+  const results: WeeklyPlanDish[] = []
+  const uncovered: { slotId: string; dayOfWeek: number }[] = []
+
+  for (const slot of slots) {
+    const lo = Math.round(slot.targetKcal * 0.85)
+    const hi = Math.round(slot.targetKcal * 1.15)
+    const tags = acceptedTagsForSlot(slot.name)
+
+    let candidates: CatalogRecipe[] = []
+    try {
+      const recipes = await db.recipe.findMany({
+        where: {
+          kcal: { gte: lo, lte: hi },
+          tags: { some: { tag: { name: { in: tags } } } },
+        },
+        include: {
+          ingredients: { orderBy: { position: "asc" } },
+          steps: { orderBy: { position: "asc" } },
+        },
+        take: 200,
+      })
+      candidates = recipes.filter((r) => !hasHardToChewIngredient(r.ingredients.map((i) => i.name)))
+    } catch (err) {
+      console.error("[ai-weekly] catalog query failed:", err)
+      candidates = []
+    }
+
+    shuffle(candidates)
+
+    for (let day = 0; day < DAYS; day++) {
+      const pick = candidates.find((r) => !usedSlugs.has(r.slug))
+      if (!pick) {
+        uncovered.push({ slotId: slot.slotId, dayOfWeek: day })
+        continue
+      }
+      usedSlugs.add(pick.slug)
+      results.push(catalogToDish(pick, slot.slotId, day))
+    }
+  }
+
+  // Fill any cells the catalog could not cover via the existing OpenAI path.
+  if (uncovered.length > 0) {
+    const ai = await generateWeeklyPlanAI(params)
+    if (ai) {
+      const byCell = new Map<string, PlannedDishAI>()
+      for (const d of ai) byCell.set(`${d.slotId}:${d.dayOfWeek}`, d)
+      for (const cell of uncovered) {
+        const d = byCell.get(`${cell.slotId}:${cell.dayOfWeek}`)
+        if (!d) continue
+        results.push({
+          slotId: cell.slotId,
+          dayOfWeek: cell.dayOfWeek,
+          name: d.name,
+          kcal: d.kcal,
+          proteins: d.proteins,
+          fats: d.fats,
+          carbs: d.carbs,
+          cookTime: parseCookTimeStr(d.cookTime),
+          ingredients: [],
+          steps: [],
+          source: "ai",
+        })
+      }
+    }
+  }
+
+  return results.length > 0 ? results : null
 }
 
 // ─── Lazy recipe generation ───────────────────────────────────────────────────
