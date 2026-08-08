@@ -1,7 +1,11 @@
 import OpenAI from "openai"
 import { z } from "zod"
 
-const openai = new OpenAI()
+let _openai: OpenAI | null = null
+function getClient(): OpenAI {
+  if (!_openai) _openai = new OpenAI()
+  return _openai
+}
 
 const itemSchema = z.object({
   name: z.string(),
@@ -13,7 +17,7 @@ export async function aggregateShoppingList(
 ): Promise<{ name: string; qty: string | null }[]> {
   if (ingredients.length === 0) return []
 
-  const response = await openai.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: "gpt-4o-mini",
     max_tokens: 1200,
     temperature: 0.1,
