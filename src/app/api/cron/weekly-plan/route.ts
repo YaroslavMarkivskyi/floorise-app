@@ -14,7 +14,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const users = await db.user.findMany({
-    include: { profile: { select: { kcalFloor: true, kcalTarget: true, timezone: true } } },
+    include: {
+      profile: {
+        select: {
+          kcalFloor: true,
+          kcalTarget: true,
+          timezone: true,
+          dietaryRestrictions: true,
+          dietaryNotes: true,
+        },
+      },
+    },
   })
 
   let generated = 0
@@ -25,6 +35,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const timezone = profile?.timezone ?? "Europe/Kyiv"
     const kcalFloor = profile?.kcalFloor ?? 2000
     const kcalTarget = profile?.kcalTarget ?? 2800
+    const restrictions = profile?.dietaryRestrictions ?? []
+    const dietaryNotes = profile?.dietaryNotes ?? undefined
 
     const slots = await db.mealSlot.findMany({
       where: { userId: user.id, active: true },
@@ -49,6 +61,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })),
       kcalFloor,
       kcalTarget,
+      restrictions,
+      dietaryNotes,
     })
 
     if (!dishes) {

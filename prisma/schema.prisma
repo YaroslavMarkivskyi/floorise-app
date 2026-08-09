@@ -85,6 +85,12 @@ model Profile {
   timezone       String   @default("Europe/Kyiv")
   telegramChatId String?  @map("telegram_chat_id")
   telegramLinked Boolean  @default(false) @map("telegram_linked")
+  // Managed list of restriction flags (soft_food, no_nuts, vegetarian, ...).
+  // Empty array = no restrictions, full catalog available.
+  dietaryRestrictions String[] @default([]) @map("dietary_restrictions")
+  // Free-text extra wishes — only injected into the AI-fallback prompt,
+  // never enforced against the recipe catalog (unreliable matching).
+  dietaryNotes   String?  @map("dietary_notes")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 

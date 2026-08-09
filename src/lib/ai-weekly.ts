@@ -2,7 +2,7 @@ import OpenAI from "openai"
 import "server-only"
 import { z } from "zod"
 import { db } from "@/lib/db"
-import { hasHardToChewIngredient } from "@/lib/dietary-filters"
+import { buildExcludedKeywords, hasExcludedIngredient } from "@/lib/dietary-filters"
 
 let _client: OpenAI | null = null
 function getClient(): OpenAI {
@@ -70,8 +70,10 @@ async function generateWeeklyPlanAI(params: {
   kcalTarget: number
   userNotes?: string
   fromStock?: string[]
+  restrictions?: string[]
+  dietaryNotes?: string
 }): Promise<PlannedDishAI[] | null> {
-  const { slots, kcalFloor, kcalTarget, userNotes, fromStock } = params
+  const { slots, kcalFloor, kcalTarget, userNotes, fromStock, restrictions, dietaryNotes } = params
 
   const slotsDesc = slots
     .map(
@@ -87,6 +89,23 @@ async function generateWeeklyPlanAI(params: {
 
   const notesLine = userNotes ? `Побажання: ${userNotes}.` : ""
 
+  // Human-readable restriction hints so the fallback path also respects the
+  // user's dietary flags (the catalog path enforces them structurally).
+  const restrictionLabels: Record<string, string> = {
+    soft_food: "тільки м'яка їжа, без твердого/хрумкого (горіхи, сухарі, чіпси, льодяники)",
+    no_nuts: "без горіхів та арахісу",
+    vegetarian: "вегетаріанські страви — без м'яса, риби та птиці",
+    no_dairy: "без молочних продуктів",
+    no_gluten: "без глютену (пшениця, борошно, звичайний хліб, паста)",
+  }
+  const restrictionLine =
+    restrictions && restrictions.length > 0
+      ? `Дієтичні обмеження (ОБОВ'ЯЗКОВО дотримуйся): ${restrictions
+          .map((r) => restrictionLabels[r] ?? r)
+          .join("; ")}.`
+      : ""
+  const dietaryNotesLine = dietaryNotes ? `Додаткові побажання: ${dietaryNotes}.` : ""
+
   const userPrompt = `Склади тижневий план харчування на 7 днів (dayOfWeek: 0=Пн, 1=Вт, 2=Ср, 3=Чт, 4=Пт, 5=Сб, 6=Нд).
 
 Прийоми їжі (однакові щодня, ${slots.length} шт.):
@@ -95,6 +114,8 @@ ${slotsDesc}
 Загальний діапазон ккал на день: ${kcalFloor}–${kcalTarget} ккал.
 ${stockLine}
 ${notesLine}
+${restrictionLine}
+${dietaryNotesLine}
 
 ВАЖЛИВО:
 - Поле "name" — це КОНКРЕТНА НАЗВА СТРАВИ (наприклад "Вівсяна каша з ягодами", "Курка з рисом", "Омлет з сиром"), НЕ назва прийому їжі ("Сніданок", "Обід" тощо).
@@ -163,6 +184,18 @@ const MEAT_TAGS = ["м’ясо", "м'ясо", "мʼясо"]
 // calorie fit. These are enforced both by exclusion from every slot's accepted
 // tag list and by a hard NOT filter on the catalog query below.
 const EXCLUDED_TAGS = ["коктейль", "напої", "напій", "алкоголь", "смузі"]
+
+// Tags to exclude from the catalog query when the user is vegetarian —
+// anything meat/fish/poultry based. Enforced via a hard NOT filter, mirroring
+// EXCLUDED_TAGS. The ingredient-keyword path does not cover these because meat
+// dishes are tagged rather than reliably keyword-matchable.
+const VEG_EXCLUDED_TAGS = [
+  ...MEAT_TAGS,
+  "риба",
+  "морепродукти",
+  "птиця",
+  "курка",
+]
 
 const BREAKFAST_TAGS = ["сніданок", "випічка", "оладки", "сирники", "млинці", "запіканка"]
 const SNACK_TAGS = [
@@ -253,12 +286,21 @@ export async function generateWeeklyPlan(params: {
   kcalTarget: number
   userNotes?: string
   fromStock?: string[]
+  restrictions?: string[]
+  dietaryNotes?: string
 }): Promise<WeeklyPlanDish[] | null> {
-  const { slots } = params
+  const { slots, restrictions = [] } = params
   const DAYS = 7
   const usedSlugs = new Set<string>()
   const results: WeeklyPlanDish[] = []
   const uncovered: { slotId: string; dayOfWeek: number }[] = []
+
+  // Per-user dietary enforcement. Empty restrictions → no filtering at all,
+  // the full catalog stays available.
+  const excludedKeywords = buildExcludedKeywords(restrictions)
+  const excludedTags = restrictions.includes("vegetarian")
+    ? [...EXCLUDED_TAGS, ...VEG_EXCLUDED_TAGS]
+    : EXCLUDED_TAGS
 
   for (const slot of slots) {
     const lo = Math.round(slot.targetKcal * 0.85)
@@ -271,9 +313,10 @@ export async function generateWeeklyPlan(params: {
         where: {
           kcal: { gte: lo, lte: hi },
           tags: { some: { tag: { name: { in: tags } } } },
-          // Never surface cocktails/drinks in a meal slot, even if the recipe
-          // also carries an otherwise-accepted tag.
-          NOT: { tags: { some: { tag: { name: { in: EXCLUDED_TAGS } } } } },
+          // Never surface cocktails/drinks (and, for vegetarians, meat/fish/
+          // poultry) in a meal slot, even if the recipe also carries an
+          // otherwise-accepted tag.
+          NOT: { tags: { some: { tag: { name: { in: excludedTags } } } } },
         },
         include: {
           ingredients: { orderBy: { position: "asc" } },
@@ -281,7 +324,9 @@ export async function generateWeeklyPlan(params: {
         },
         take: 200,
       })
-      candidates = recipes.filter((r) => !hasHardToChewIngredient(r.ingredients.map((i) => i.name)))
+      candidates = recipes.filter(
+        (r) => !hasExcludedIngredient(r.ingredients.map((i) => i.name), excludedKeywords),
+      )
     } catch (err) {
       console.error("[ai-weekly] catalog query failed:", err)
       candidates = []
