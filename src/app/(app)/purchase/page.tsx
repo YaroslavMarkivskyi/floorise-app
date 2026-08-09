@@ -174,6 +174,16 @@ export default async function PurchasePage({ searchParams }: Props) {
               </button>
             </form>
           )}
+          {list?.silpoCheckoutUrl && (
+            <a
+              href={list.silpoCheckoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 whitespace-nowrap"
+            >
+              Оформити в Сільпо ↗
+            </a>
+          )}
           {list && (
             <form action={finishTrip}>
               <input type="hidden" name="weekStart" value={displayWeekIso} />

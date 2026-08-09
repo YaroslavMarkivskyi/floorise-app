@@ -193,6 +193,24 @@ export async function syncFromPlan(formData: FormData): Promise<void> {
     })),
   })
 
+  // If the user connected Silpo, build a real cart and store the checkout link.
+  // Any failure is swallowed so the plain text list keeps working.
+  const silpoConnection = await db.silpoConnection.findUnique({
+    where: { userId },
+    select: { userId: true },
+  })
+  if (silpoConnection) {
+    const { buildSilpoCart } = await import("@/lib/silpo-cart")
+    const checkoutUrl = await buildSilpoCart(
+      userId,
+      aggregated.map((item) => ({ name: item.name, qty: item.qty })),
+    )
+    await db.shoppingList.update({
+      where: { id: list.id },
+      data: { silpoCheckoutUrl: checkoutUrl },
+    })
+  }
+
   revalidatePath("/purchase")
   revalidatePath("/plan")
 }
