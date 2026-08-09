@@ -26,11 +26,19 @@ export async function generateDraftPlan(
 
   const profile = await db.profile.findUnique({
     where: { userId },
-    select: { kcalFloor: true, kcalTarget: true, timezone: true },
+    select: {
+      kcalFloor: true,
+      kcalTarget: true,
+      timezone: true,
+      dietaryRestrictions: true,
+      dietaryNotes: true,
+    },
   })
   const timezone = profile?.timezone ?? "Europe/Kyiv"
   const kcalFloor = profile?.kcalFloor ?? 2000
   const kcalTarget = profile?.kcalTarget ?? 2800
+  const restrictions = profile?.dietaryRestrictions ?? []
+  const dietaryNotes = profile?.dietaryNotes ?? undefined
 
   const slots = await db.mealSlot.findMany({
     where: { userId, active: true },
@@ -58,6 +66,8 @@ export async function generateDraftPlan(
     kcalFloor,
     kcalTarget,
     userNotes,
+    restrictions,
+    dietaryNotes,
   })
 
   if (!dishes) return { error: "Не вдалось згенерувати план. Спробуй ще." }

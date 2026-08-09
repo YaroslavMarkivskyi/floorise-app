@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { DIETARY_RESTRICTION_VALUES } from "@/lib/dietary-filters"
 
 export type SlotActionState = { error: string } | { success: true } | null
 
@@ -83,6 +84,19 @@ const updateProfileSchema = z
       .min(1000, "Мінімум 1000 ккал")
       .max(4000, "Максимум 4000 ккал"),
     timezone: z.string().min(1, "Оберіть часовий пояс"),
+    dietaryRestrictions: z
+      .array(z.string())
+      .default([])
+      // Keep only known flags; silently drop anything unexpected.
+      .transform((vals) =>
+        vals.filter((v) => (DIETARY_RESTRICTION_VALUES as readonly string[]).includes(v)),
+      ),
+    dietaryNotes: z
+      .string()
+      .trim()
+      .max(500, "Максимум 500 символів")
+      .optional()
+      .transform((v) => (v ? v : null)),
   })
   .refine((d) => d.kcalTarget > d.kcalFloor, {
     message: "Ціль має бути більше мінімуму",
@@ -100,6 +114,8 @@ export async function updateProfile(
     kcalFloor: formData.get("kcalFloor"),
     kcalTarget: formData.get("kcalTarget"),
     timezone: formData.get("timezone"),
+    dietaryRestrictions: formData.getAll("dietaryRestrictions"),
+    dietaryNotes: formData.get("dietaryNotes") ?? undefined,
   })
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 

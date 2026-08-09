@@ -13,7 +13,13 @@ export default async function SettingsPage() {
   const [profile, slots] = await Promise.all([
     db.profile.findUnique({
       where: { userId },
-      select: { kcalFloor: true, kcalTarget: true, timezone: true },
+      select: {
+        kcalFloor: true,
+        kcalTarget: true,
+        timezone: true,
+        dietaryRestrictions: true,
+        dietaryNotes: true,
+      },
     }),
     db.mealSlot.findMany({
       where: { userId },
@@ -36,6 +42,8 @@ export default async function SettingsPage() {
             kcalFloor={profile?.kcalFloor ?? 2000}
             kcalTarget={profile?.kcalTarget ?? 2800}
             timezone={profile?.timezone ?? "Europe/Kyiv"}
+            dietaryRestrictions={profile?.dietaryRestrictions ?? []}
+            dietaryNotes={profile?.dietaryNotes ?? ""}
           />
         </div>
       </section>
