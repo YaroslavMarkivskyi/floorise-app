@@ -158,10 +158,16 @@ ${notesLine}
 // The data uses three different apostrophe glyphs for "м'ясо" — match them all.
 const MEAT_TAGS = ["м’ясо", "м'ясо", "мʼясо"]
 
+// Tag categories that must never appear in any meal slot of a food plan —
+// alcoholic cocktails and drinks are inappropriate as meals regardless of
+// calorie fit. These are enforced both by exclusion from every slot's accepted
+// tag list and by a hard NOT filter on the catalog query below.
+const EXCLUDED_TAGS = ["коктейль", "напої", "напій", "алкоголь", "смузі"]
+
 const BREAKFAST_TAGS = ["сніданок", "випічка", "оладки", "сирники", "млинці", "запіканка"]
 const SNACK_TAGS = [
   "закуска", "закуски", "десерт", "салат", "салати", "фрукти", "ягоди",
-  "напої", "напій", "коктейль", "смузі", "перекус", "сендвіч",
+  "перекус", "сендвіч",
 ]
 const LUNCH_TAGS = [
   "перша страва", "перші страви", "суп", "супи", "борщ", "крем-суп",
@@ -172,7 +178,7 @@ const DINNER_TAGS = [
   "вечеря", "основна страва", "основні страви", "риба", "морепродукти",
   "птиця", "курка", "салат", "овочі", "гарнір", ...MEAT_TAGS,
 ]
-const LATE_TAGS = ["десерт", "салат", "напої", "коктейль", "сир", "протеїн", "закуска"]
+const LATE_TAGS = ["десерт", "салат", "сир", "протеїн", "закуска"]
 const DEFAULT_TAGS = ["основні страви", "основна страва", "салат", "суп", "гарнір", "риба", ...MEAT_TAGS]
 
 function acceptedTagsForSlot(slotName: string): string[] {
@@ -265,6 +271,9 @@ export async function generateWeeklyPlan(params: {
         where: {
           kcal: { gte: lo, lte: hi },
           tags: { some: { tag: { name: { in: tags } } } },
+          // Never surface cocktails/drinks in a meal slot, even if the recipe
+          // also carries an otherwise-accepted tag.
+          NOT: { tags: { some: { tag: { name: { in: EXCLUDED_TAGS } } } } },
         },
         include: {
           ingredients: { orderBy: { position: "asc" } },
