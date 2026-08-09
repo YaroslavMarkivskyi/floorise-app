@@ -4,13 +4,20 @@ import { db } from "@/lib/db"
 import { routes } from "@/lib/routes"
 import { ProfileForm } from "@/components/ProfileForm"
 import { SlotForm } from "@/components/SlotForm"
+import { disconnectSilpo } from "@/actions/silpo"
 
-export default async function SettingsPage() {
+interface Props {
+  searchParams: Promise<{ silpo?: string }>
+}
+
+export default async function SettingsPage({ searchParams }: Props) {
   const session = await auth()
   if (!session?.user?.id) redirect(routes.login)
   const userId = session.user.id
 
-  const [profile, slots] = await Promise.all([
+  const { silpo: silpoStatus } = await searchParams
+
+  const [profile, slots, silpoConnection] = await Promise.all([
     db.profile.findUnique({
       where: { userId },
       select: {
@@ -25,6 +32,10 @@ export default async function SettingsPage() {
       where: { userId },
       orderBy: { order: "asc" },
       select: { id: true, name: true, time: true, targetKcal: true, active: true, order: true },
+    }),
+    db.silpoConnection.findUnique({
+      where: { userId },
+      select: { connectedAt: true },
     }),
   ])
 
@@ -45,6 +56,52 @@ export default async function SettingsPage() {
             dietaryRestrictions={profile?.dietaryRestrictions ?? []}
             dietaryNotes={profile?.dietaryNotes ?? ""}
           />
+        </div>
+      </section>
+
+      {/* ─── Silpo connection ─────────────────────────────────────── */}
+      <section>
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-zinc-400">
+          Сільпо
+        </h2>
+        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+          {silpoStatus === "error" && (
+            <p className="mb-3 text-sm text-red-600">
+              Не вдалося підключити Сільпо. Спробуй ще раз.
+            </p>
+          )}
+          {silpoConnection ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                <span className="text-sm font-semibold text-zinc-700">Підключено</span>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Затверджені плани формують реальний кошик Сільпо з посиланням на оформлення.
+              </p>
+              <form action={disconnectSilpo}>
+                <button
+                  type="submit"
+                  className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50"
+                >
+                  Відключити
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-zinc-600">
+                Підключи акаунт Сільпо, щоб зі списку покупок автоматично збирався
+                реальний кошик.
+              </p>
+              <a
+                href="/api/silpo/connect"
+                className="inline-block rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-zinc-700"
+              >
+                Підключити Сільпо
+              </a>
+            </div>
+          )}
         </div>
       </section>
 

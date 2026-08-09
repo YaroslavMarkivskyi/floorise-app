@@ -29,8 +29,24 @@ model User {
   weightEntries WeightEntry[]
   measurements  BodyMeasurement[]
   weeklyPlans   WeeklyPlan[]
+  silpoConnection SilpoConnection?
 
   @@map("users")
+}
+
+// ─── External account: official Silpo MCP (OAuth 2.1 per-user) ────────────────
+
+model SilpoConnection {
+  id           String   @id @default(cuid())
+  userId       String   @unique @map("user_id")
+  accessToken  String   @map("access_token") @db.Text
+  refreshToken String?  @map("refresh_token") @db.Text
+  expiresAt    DateTime @map("expires_at")
+  connectedAt  DateTime @default(now()) @map("connected_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("silpo_connections")
 }
 
 model Account {
@@ -191,6 +207,8 @@ model ShoppingList {
   status    ListStatus @default(active)
   createdAt DateTime   @default(now()) @map("created_at")
   closedAt  DateTime?  @map("closed_at")
+  // Silpo checkout link, populated when a connected user syncs a plan into a real cart.
+  silpoCheckoutUrl String? @map("silpo_checkout_url") @db.Text
 
   user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   items ShoppingItem[]
