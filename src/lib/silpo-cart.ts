@@ -56,13 +56,19 @@ export async function buildSilpoCart(
   userId: string,
   items: SilpoCartItem[],
 ): Promise<string | null> {
-  if (items.length === 0) return null
+  if (items.length === 0) {
+    console.warn("[silpo-cart] empty items list — nothing to build")
+    return null
+  }
 
   try {
     // 1. Resolve the user's active cart id.
     const cart = unwrap(await callSilpoTool(userId, "silpo_get_my_shopping_cart"))
     const cartId = pick<string>(cart, ["cartId", "id"])
-    if (!cartId) return null
+    if (!cartId) {
+      console.warn("[silpo-cart] no cartId in silpo_get_my_shopping_cart response", cart)
+      return null
+    }
 
     // 2. Cart details → branch / delivery context.
     const cartDetails = unwrap(
@@ -70,6 +76,12 @@ export async function buildSilpoCart(
     )
     const branchId = pick<string>(cartDetails, ["branchId", "branchGuid"])
     const deliveryType = pick<string>(cartDetails, ["deliveryType"])
+    if (!branchId) {
+      console.warn(
+        "[silpo-cart] no branchId in silpo_get_shopping_cart_by_id response (continuing without it)",
+        cartDetails,
+      )
+    }
 
     // 3. Validate delivery slot availability (best-effort; ignore failures).
     if (branchId) {
@@ -86,8 +98,18 @@ export async function buildSilpoCart(
         queries: items.map((i) => i.name),
       }),
     )
+    console.log(
+      "[silpo-cart] raw silpo_find_products_batch response",
+      JSON.stringify(batch),
+    )
     const products = extractProducts(batch)
-    if (products.length === 0) return null
+    if (products.length === 0) {
+      console.warn(
+        "[silpo-cart] no products resolved from silpo_find_products_batch response",
+        batch,
+      )
+      return null
+    }
 
     // 5. Add all resolved products to the cart.
     await callSilpoTool(userId, "silpo_add_or_update_cart_products", {
@@ -99,7 +121,15 @@ export async function buildSilpoCart(
     const finalCart = unwrap(
       await callSilpoTool(userId, "silpo_get_shopping_cart_by_id", { cartId }),
     )
-    return pick<string>(finalCart, ["checkoutWebLink", "checkoutUrl", "webLink"]) ?? null
+    const checkoutUrl = pick<string>(finalCart, ["checkoutWebLink", "checkoutUrl", "webLink"])
+    if (!checkoutUrl) {
+      console.warn(
+        "[silpo-cart] no checkout link in final silpo_get_shopping_cart_by_id response",
+        finalCart,
+      )
+      return null
+    }
+    return checkoutUrl
   } catch (err) {
     console.error("[silpo-cart] build failed", err)
     return null
