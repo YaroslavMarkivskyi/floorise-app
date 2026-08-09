@@ -1,5 +1,3 @@
-◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
-◇ injected env (41) from .env.local // tip: ⌘ suppress logs { quiet: true }
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
