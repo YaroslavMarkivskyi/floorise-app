@@ -7,6 +7,7 @@ import { getWeekStart, getDayOfWeek } from "@/lib/plan"
 import { CheckboxItem } from "@/components/CheckboxItem"
 import { AddItemForm } from "@/components/AddItemForm"
 import { PurchaseNav } from "@/components/PurchaseNav"
+import { SilpoCartBanner } from "@/components/SilpoCartBanner"
 import type { ShoppingItem } from "@/generated/prisma/client"
 import { db } from "@/lib/db"
 
@@ -174,16 +175,6 @@ export default async function PurchasePage({ searchParams }: Props) {
               </button>
             </form>
           )}
-          {list?.silpoCheckoutUrl && (
-            <a
-              href={list.silpoCheckoutUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 whitespace-nowrap"
-            >
-              Оформити в Сільпо ↗
-            </a>
-          )}
           {list && (
             <form action={finishTrip}>
               <input type="hidden" name="weekStart" value={displayWeekIso} />
@@ -197,6 +188,11 @@ export default async function PurchasePage({ searchParams }: Props) {
           )}
         </div>
       </div>
+
+      {/* ─── Silpo cart status ───────────────────────────────── */}
+      {isCurrentWeek && list && (
+        <SilpoCartBanner status={list.silpoCartStatus} checkoutUrl={list.silpoCheckoutUrl} />
+      )}
 
       {/* ─── Progress + Add form ─────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3">
