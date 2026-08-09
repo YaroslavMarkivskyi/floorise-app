@@ -119,6 +119,38 @@ export async function syncFromPlan(formData: FormData): Promise<void> {
   if (!weekStartIso) return
   const weekStart = new Date(`${weekStartIso}T00:00:00.000Z`)
 
+  await syncShoppingListFromPlan(userId, weekStart)
+}
+
+/**
+ * Rebuild the week's shopping list from the approved plan and, for connected
+ * users, build a real Silpo cart. Heavy work (AI recipe generation + Silpo MCP
+ * calls) lives here so it can run in the background via `after()`.
+ *
+ * The whole body is wrapped so `silpoCartStatus` always ends up "ready" or
+ * "failed" — an unhandled throw inside `after()` must never leave the status
+ * stuck at "building".
+ */
+export async function syncShoppingListFromPlan(userId: string, weekStart: Date): Promise<void> {
+  try {
+    await syncShoppingListFromPlanInner(userId, weekStart)
+    await db.shoppingList.updateMany({
+      where: { userId, weekStart },
+      data: { silpoCartStatus: "ready" },
+    })
+  } catch (err) {
+    console.error("syncShoppingListFromPlan failed", err)
+    await db.shoppingList.updateMany({
+      where: { userId, weekStart },
+      data: { silpoCartStatus: "failed" },
+    })
+  }
+
+  revalidatePath("/purchase")
+  revalidatePath("/plan")
+}
+
+async function syncShoppingListFromPlanInner(userId: string, weekStart: Date): Promise<void> {
   const plan = await db.weeklyPlan.findFirst({
     where: { userId, weekStart, status: "approved" },
     include: {
@@ -210,9 +242,6 @@ export async function syncFromPlan(formData: FormData): Promise<void> {
       data: { silpoCheckoutUrl: checkoutUrl },
     })
   }
-
-  revalidatePath("/purchase")
-  revalidatePath("/plan")
 }
 
 // ─── getOrCreateActiveList (kept for compat) ──────────────────────────────────

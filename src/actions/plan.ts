@@ -1,12 +1,14 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import { after } from "next/server"
 import { z } from "zod"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { generateWeeklyPlan, regenerateSinglePlannedDish } from "@/lib/ai-weekly"
 import { getWeekStart } from "@/lib/plan"
 import { getOrCreateListForWeek } from "@/lib/purchase"
+import { syncShoppingListFromPlan } from "@/actions/purchase"
 import { STAPLES } from "@/lib/staples"
 
 export type PlanActionState = { error: string } | { success: true } | null
@@ -158,6 +160,22 @@ export async function approvePlan(planId: string): Promise<void> {
       data: { status: "approved" },
     })
   })
+
+  // Synchronously mark the cart as "building" so /purchase can honestly reflect
+  // the state on the very next render, before the background job finishes.
+  await db.shoppingList.upsert({
+    where: { userId_weekStart: { userId, weekStart: plan.weekStart } },
+    update: { silpoCartStatus: "building" },
+    create: {
+      userId,
+      weekStart: plan.weekStart,
+      silpoCartStatus: "building",
+      items: { createMany: { data: STAPLES.map((s) => ({ ...s, source: "staple" as const })) } },
+    },
+  })
+
+  // Heavy work (AI recipe generation + Silpo MCP calls) runs after the response.
+  after(() => syncShoppingListFromPlan(userId, plan.weekStart))
 
   revalidatePath("/plan")
   revalidatePath("/purchase")

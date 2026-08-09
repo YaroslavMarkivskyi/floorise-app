@@ -209,6 +209,8 @@ model ShoppingList {
   closedAt  DateTime?  @map("closed_at")
   // Silpo checkout link, populated when a connected user syncs a plan into a real cart.
   silpoCheckoutUrl String? @map("silpo_checkout_url") @db.Text
+  // Background cart build state: idle | building | ready | failed
+  silpoCartStatus  String  @default("idle") @map("silpo_cart_status")
 
   user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   items ShoppingItem[]
